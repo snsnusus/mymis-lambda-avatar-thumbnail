@@ -1,49 +1,83 @@
-# AWS Lambda Empty Function Project
+# MyMIS.Lambda.AvatarThumbnail
 
-This starter project consists of:
-* Function.cs - class file containing a class with a single function handler method
-* aws-lambda-tools-defaults.json - default argument settings for use with Visual Studio and command line deployment tools for AWS
+An AWS Lambda function that generates thumbnails for Employee avatars
+uploaded to `mymis-api`. Part of the MyMIS project.
 
-You may also have a test project depending on the options selected.
+## What this does
 
-The generated function handler is a simple method accepting a string argument that returns the uppercase equivalent of the input string. Replace the body of this method, and parameters, to suit your needs. 
+1. Triggered by an S3 `ObjectCreated` event when a new file lands under the
+   `avatars/` prefix in the `mymis-uploads-bucket` S3 bucket.
+2. Downloads the original image, resizes it to fit within 150×150px using
+   ImageSharp (`ResizeMode.Max` — preserves aspect ratio, never upscales).
+3. Uploads the resized thumbnail to the `avatars-thumbnails/` prefix in the
+   same bucket.
+4. Calls back to `mymis-api`'s internal endpoint
+   (`PATCH /api/Employees/{id}/avatar-thumbnail`) to record the thumbnail's
+   location.
 
-## Here are some steps to follow from Visual Studio:
+## Project layout
 
-To deploy your function to AWS Lambda, right click the project in Solution Explorer and select *Publish to AWS Lambda*.
+This project is intentionally flat — there is no `src/` or `test/`
+subfolder. Everything lives directly in the repo root:
 
-To view your deployed function open its Function View window by double-clicking the function name shown beneath the AWS Lambda node in the AWS Explorer tree.
+- `Function.cs` — the handler
+- `MyMIS.Lambda.AvatarThumbnail.csproj` — project file
+- `aws-lambda-tools-defaults.json` — saved deploy settings (function name,
+  IAM role, region)
 
-To perform testing against your deployed function use the Test Invoke tab in the opened Function View window.
+## Prerequisites
 
-To configure event sources for your deployed function, for example to have your function invoked when an object is created in an Amazon S3 bucket, use the Event Sources tab in the opened Function View window.
+- .NET 10 SDK
+- The `Amazon.Lambda.Tools` global CLI tool:
+  ```
+  dotnet tool install -g Amazon.Lambda.Tools
+  ```
+- A SixLabors ImageSharp license file, `sixlabors.lic`, placed in this
+  folder. **Not included in this repo** (gitignored — it's a personal,
+  non-transferable credential). Obtain one at
+  [sixlabors.com/pricing](https://sixlabors.com/pricing); the free
+  "Hobbyist" tier covers this project.
+- AWS CLI configured with credentials that can deploy Lambda functions.
 
-To update the runtime configuration of your deployed function use the Configuration tab in the opened Function View window.
+## Build
 
-To view execution logs of invocations of your function use the Logs tab in the opened Function View window.
-
-## Here are some steps to follow to get started from the command line:
-
-Once you have edited your template and code you can deploy your application using the [Amazon.Lambda.Tools Global Tool](https://github.com/aws/aws-extensions-for-dotnet-cli#aws-lambda-amazonlambdatools) from the command line.
-
-Install Amazon.Lambda.Tools Global Tools if not already installed.
 ```
-    dotnet tool install -g Amazon.Lambda.Tools
+dotnet build
 ```
 
-If already installed check if new version is available.
+## Deploy
+
 ```
-    dotnet tool update -g Amazon.Lambda.Tools
+dotnet lambda deploy-function mymis-avatar-thumbnail
 ```
 
-Execute unit tests
-```
-    cd "MyMIS.AvatarThumbnailLambda/test/MyMIS.AvatarThumbnailLambda.Tests"
-    dotnet test
-```
+Updates the existing `mymis-avatar-thumbnail` function in place.
 
-Deploy function to AWS Lambda
+## Configuration
+
+Two environment variables, set on the Lambda function itself (not in this
+repo):
+
+| Variable | Purpose |
+|---|---|
+| `MYMIS_API_BASE_URL` | Base URL of the `mymis-api` instance to call back to |
+| `INTERNAL_CALLBACK_SECRET` | Shared secret matching `mymis-api`'s `Internal:CallbackSecret` — must be identical on both sides |
+
+Set via:
 ```
-    cd "MyMIS.AvatarThumbnailLambda/src/MyMIS.AvatarThumbnailLambda"
-    dotnet lambda deploy-function
+aws lambda update-function-configuration --function-name mymis-avatar-thumbnail --environment file://env.json
 ```
+using a gitignored, local-only JSON file — never commit real secret values.
+
+## IAM
+
+Runs under `mymis-avatar-thumbnail-lambda-role`: `s3:GetObject` on
+`avatars/*`, `s3:PutObject` on `avatars-thumbnails/*` only, plus
+`AWSLambdaBasicExecutionRole` for CloudWatch logging.
+
+## S3 trigger
+
+Configured on `mymis-uploads-bucket`'s Event Notifications: all object
+create events, prefix `avatars/`, destination this function. **Do not**
+widen that prefix to include `avatars-thumbnails/` — this function writes
+there, and doing so would cause it to re-trigger itself indefinitely.
