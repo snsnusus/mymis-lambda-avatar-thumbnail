@@ -51,11 +51,16 @@ public class Function
 
       using var image = await Image.LoadAsync(originalStream);
 
-      image.Mutate(x => x.Resize(new ResizeOptions
+      // ResizeMode.Max would also enlarge a photo that is already smaller than the limit,
+      // so only shrink images that are bigger than the thumbnail size.
+      if (image.Width > ThumbnailMaxDimension || image.Height > ThumbnailMaxDimension)
       {
-        Size = new Size(ThumbnailMaxDimension, ThumbnailMaxDimension),
-        Mode = ResizeMode.Max
-      }));
+        image.Mutate(x => x.Resize(new ResizeOptions
+        {
+          Size = new Size(ThumbnailMaxDimension, ThumbnailMaxDimension),
+          Mode = ResizeMode.Max
+        }));
+      }
 
       using var thumbnailStream = new MemoryStream();
       await image.SaveAsJpegAsync(thumbnailStream);
